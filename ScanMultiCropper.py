@@ -241,3 +241,26 @@ class DatedScanMultiCropper(ScanMultiCropper):
         exif_dict = super()._get_exif(img)
         exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = f"{self.year}:{self.month}:{self.day}"
         return exif_dict
+
+
+class TaggedScanMultiCropper(ScanMultiCropper):
+    def __init__(self, tags, **kwargs):
+        print(kwargs)
+        super().__init__(**kwargs)
+        self.tags = tags
+        print(f"Saved photos will have tags: {tags}")
+
+    def run(self, save=True, show=False, photo=None, crop=True):
+        print("running")
+        for filename in os.listdir(self.scan_dir):
+            if filename.lower().endswith((".jpg", ".jpeg", ".png")) and (not photo or filename == photo):
+                super()._process_file(filename, save=save, show=show, crop=crop)
+                break
+
+    def _get_exif(self, img):
+        exif_dict = super()._get_exif(img)
+        ucs2 = []
+        for c in self.tags:
+            ucs2 += [ord(c), 0]
+        exif_dict["0th"][piexif.ImageIFD.XPKeywords] = ucs2
+        return exif_dict
