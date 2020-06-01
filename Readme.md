@@ -14,5 +14,6 @@ This is a python program that will automatically crop photos from a scanned imag
 3. Run `pip install -r requirements.txt`
 4. Run `jupyter lab`
 5. If a browser does not open, go to http://localhost:8888/ in your browser.
-6. Follow the instructions from there
+6. Open `FotoCropper.ipynb`
+7. Follow the instructions from there
 
