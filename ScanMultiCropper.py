@@ -250,13 +250,6 @@ class TaggedScanMultiCropper(ScanMultiCropper):
         self.tags = tags
         print(f"Saved photos will have tags: {tags}")
 
-    def run(self, save=True, show=False, photo=None, crop=True):
-        print("running")
-        for filename in os.listdir(self.scan_dir):
-            if filename.lower().endswith((".jpg", ".jpeg", ".png")) and (not photo or filename == photo):
-                super()._process_file(filename, save=save, show=show, crop=crop)
-                break
-
     def _get_exif(self, img):
         exif_dict = super()._get_exif(img)
         ucs2 = []
