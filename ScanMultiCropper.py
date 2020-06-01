@@ -1,5 +1,6 @@
 import os
 import cv2
+import piexif
 from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,43 +10,35 @@ import scipy.cluster.hierarchy as hcluster
 
 class ScanMultiCropper:
 
-    def __init__(self, scan_dir, output_dir, detector="gauss"):
+    def __init__(self, scan_dir="", output_dir="", detector="gauss", **kwargs):
         self.scan_dir = scan_dir
         self.output_dir = output_dir
         self.detector = detector
         print(f"Processing files in {self.scan_dir} and moving cropped photos to {self.output_dir}")
 
-    def start(self, save=True, show=False, photo=None, crop=True):
-        scale_factor = 0.4
-
+    def run(self, save=True, show=False, photo=None, crop=True):
         for filename in os.listdir(self.scan_dir):
-            if filename.endswith(".jpg") and (not photo or filename == photo):
-                print(filename)
-                ori_img = cv2.imread(os.path.join(self.scan_dir, filename))
-                img = cv2.resize(ori_img, None, fx=scale_factor, fy=scale_factor)
+            if filename.lower().endswith((".jpg", ".jpeg", ".png")) and (not photo or filename == photo):
+                self._process_file(filename, save=save, show=show, crop=crop)
 
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    def _process_file(self, filename, save, show, crop):
+        print(filename)
+        scale_factor = 0.4
+        ori_img = cv2.imread(os.path.join(self.scan_dir, filename))
+        img = cv2.resize(ori_img, None, fx=scale_factor, fy=scale_factor)
 
-                boundaries = self.find_boundaries(gray)
-                if show:
-                    self.draw_boundaries(img, boundaries, color=True)
-                if not crop:
-                    continue
-                pil_im = Image.open(os.path.join(self.scan_dir, filename))
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-                if save:
-                    print(f"found {len(boundaries)} photos")
-                    for i, [mins, maxs, _] in enumerate(boundaries):
-                        crop = pil_im.crop(
-                            (
-                                int(mins[1] / scale_factor),
-                                int(mins[0] / scale_factor),
-                                int(maxs[1] / scale_factor),
-                                int(maxs[0] / scale_factor)
-                            )
-                        )
-                        crop.save(os.path.join(self.output_dir, filename.rsplit(".")[0] + f"_{i + 1}" + ".jpg"),
-                                      "JPEG")
+        boundaries = self.find_boundaries(gray)
+        if show:
+            print(f"found {len(boundaries)} photos")
+            self.draw_boundaries(img, boundaries, color=True)
+        if not crop:
+            return
+        pil_im = Image.open(os.path.join(self.scan_dir, filename))
+
+        if save:
+            self._crop(filename, boundaries, pil_im, scale_factor)
 
     def find_boundaries(self, gray_img, ):
         scale_factor = 0.03
@@ -211,3 +204,40 @@ class ScanMultiCropper:
         y_size, x_size = im_out.shape
         no_borders = im_out[border_size:y_size - border_size, border_size:x_size - border_size]
         return no_borders
+
+    @staticmethod
+    def _get_exif(img):
+        exif_dict = piexif.load(img.info["exif"])
+        exif_dict.pop('thumbnail', None)
+        return exif_dict
+
+    def _save(self, file_path, img):
+        exif_dict = self._get_exif(img)
+        img.save(os.path.join(self.output_dir, file_path), "JPEG", exif=piexif.dump(exif_dict))
+
+    def _crop(self, filename, boundaries, pil_im, scale_factor):
+        for i, [mins, maxs, _] in enumerate(boundaries):
+            crop = pil_im.crop(
+                (
+                    int(mins[1] / scale_factor),
+                    int(mins[0] / scale_factor),
+                    int(maxs[1] / scale_factor),
+                    int(maxs[0] / scale_factor)
+                )
+            )
+            self._save(filename.rsplit(".")[0] + f"_{i + 1}" + ".jpg", crop)
+
+
+class DatedScanMultiCropper(ScanMultiCropper):
+    def __init__(self, year, month=1, day=1, **kwargs):
+        print(kwargs)
+        super().__init__(**kwargs)
+        self.year = year
+        self.month = month
+        self.day = day
+        print(f"Saved photos will have the date {year}-{month}-{day}")
+
+    def _get_exif(self, img):
+        exif_dict = super()._get_exif(img)
+        exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = f"{self.year}:{self.month}:{self.day}"
+        return exif_dict
