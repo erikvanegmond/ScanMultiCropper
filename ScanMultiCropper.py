@@ -257,3 +257,7 @@ class TaggedScanMultiCropper(ScanMultiCropper):
             ucs2 += [ord(c), 0]
         exif_dict["0th"][piexif.ImageIFD.XPKeywords] = ucs2
         return exif_dict
+
+
+class TaggedDatedScanMultiCropper(TaggedScanMultiCropper, DatedScanMultiCropper):
+    pass
