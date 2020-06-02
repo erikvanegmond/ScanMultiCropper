@@ -1,11 +1,10 @@
 # Scan Multi Cropper
 
-This is a python program that will automatically crop photos from a scanned image. The program is run from a _Jupyter Notebook_.
+This is a python program that will automatically crop photos from a scanned image. The program is run from a [_Jupyter Notebook_](https://github.com/erikvanegmond/ScanMultiCropper/blob/master/FotoCropper.ipynb).
 
 ## Requirements
 
-- Python 3.6+
-- Bunch of packages installed with pip
+- [Python 3.6+](https://www.python.org/downloads/)
 
 ## How to use
 
