@@ -1,4 +1,6 @@
 import os
+from enum import Enum, IntEnum
+
 import cv2
 import piexif
 from PIL import Image
@@ -10,15 +12,20 @@ import scipy.cluster.hierarchy as hcluster
 
 class ScanMultiCropper:
 
-    def __init__(self, scan_dir="", output_dir="", detector="gauss", **kwargs):
+    def __init__(self, scan_dir="", output_dir="", debug=False, **kwargs):
         self.scan_dir = scan_dir
         self.output_dir = output_dir
-        self.detector = detector
+        self.debug = debug
         print(f"Processing files in {self.scan_dir} and moving cropped photos to {self.output_dir}")
 
     def run(self, save=True, show=False, photo=None, crop=True):
         for filename in os.listdir(self.scan_dir):
-            if filename.lower().endswith((".jpg", ".jpeg", ".png")) and (not photo or filename == photo):
+            if filename.lower().endswith((".jpg", ".jpeg", ".png")) and \
+                    (
+                            not photo or
+                            filename == photo or
+                            (type(photo) == list and filename in photo)
+                    ):
                 self._process_file(filename, save=save, show=show, crop=crop)
 
     def _process_file(self, filename, save, show, crop):
@@ -40,23 +47,16 @@ class ScanMultiCropper:
         if save:
             self._crop(filename, boundaries, pil_im, scale_factor)
 
-    def find_boundaries(self, gray_img, ):
+    def find_boundaries(self, gray_img):
         scale_factor = 0.03
-
-        if self.detector == "blobs":
-            blobbed_img = self._simple_blobs(gray_img)
-            data, clusters = self._find_clusters(blobbed_img, scale_factor)
-        elif self.detector == "edges":
-            blobbed_img = self._edge_based_blobs(gray_img)
-            data, clusters = self._find_clusters(blobbed_img, scale_factor)
-        elif self.detector == "gauss":
-            blobbed_img = self._adaptive_gaussian_blobs(gray_img)
-            data, clusters = self._find_clusters(blobbed_img, scale_factor)
-        else:
-            raise ValueError(f"Unknown detector type {self.detector}, choose from blobs, edges, gauss")
+        blobbed_img = self._get_blobs(gray_img)
+        data, clusters = self._find_clusters(blobbed_img, scale_factor)
 
         initial_boundaries = self._find_large_image_bounding_boxes(data, clusters, scale_factor)
         boundaries = self._find_precise_boundaries(initial_boundaries, blobbed_img)
+        if self.debug:
+            self.plot(blobbed_img)
+            self.draw_boundaries(blobbed_img, boundaries)
         return boundaries
 
     @staticmethod
@@ -119,12 +119,8 @@ class ScanMultiCropper:
         clusters = hcluster.fclusterdata(data, cluster_thresh, criterion="distance")
         return data, clusters
 
-    ##########################
-    # Methods to find photos #
-    ##########################
-
     @staticmethod
-    def _simple_blobs(gray_img):
+    def _get_blobs(gray_img):
         kernel_size = 15
         border_size = 15
         blur_gray = cv2.GaussianBlur(gray_img, (kernel_size, kernel_size), 0)
@@ -141,43 +137,6 @@ class ScanMultiCropper:
         y_size, x_size = bordered.shape
         no_borders = bordered[border_size:y_size - border_size, border_size:x_size - border_size]
         return no_borders
-
-    def _edge_based_blobs(self, gray_img):
-        low_threshold = 5  # 10
-        high_threshold = 40  # 70
-        edges = cv2.Canny(gray_img, low_threshold, high_threshold)
-        edges = cv2.bitwise_not(edges)
-        kernel_size = 5
-        for i in range(8):
-            edges = cv2.GaussianBlur(edges, (kernel_size, kernel_size), 0)
-            ret, edges = cv2.threshold(edges, 180, 255, cv2.THRESH_BINARY)
-
-            if i < 2:
-                contours, hierarchy = cv2.findContours(cv2.bitwise_not(edges), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-                short_contours = [contour for contour in contours if cv2.contourArea(contour) < 200]
-                cv2.fillPoly(edges, pts=short_contours, color=(255, 255, 255))
-
-        filled = self._fill_holes(edges)
-        return filled
-
-    def _adaptive_gaussian_blobs(self, gray_img):
-        blobs = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-
-        kernel = np.ones((7, 7), np.uint8)
-        opening = cv2.morphologyEx(blobs, cv2.MORPH_OPEN, kernel)
-
-        contours, hierarchy = cv2.findContours(cv2.bitwise_not(opening), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        short_contours = [contour for contour in contours if cv2.contourArea(contour) < 200]
-        cv2.fillPoly(opening, pts=short_contours, color=(255, 255, 255))
-
-        opening = self._fill_holes(opening)
-        kernel_size = 11
-        for i in range(2):
-            opening = cv2.GaussianBlur(opening, (kernel_size, kernel_size), 0)
-            ret, opening = cv2.threshold(opening, 30, 255, cv2.THRESH_BINARY)
-
-        filled = self._fill_holes(opening)
-        return filled
 
     @staticmethod
     def _fill_holes(img):
@@ -228,9 +187,69 @@ class ScanMultiCropper:
             self._save(filename.rsplit(".")[0] + f"_{i + 1}" + ".jpg", crop)
 
 
+class EdgeBasedPhotoFinder(ScanMultiCropper):
+    def _get_blobs(self, gray_img):
+        low_threshold = 5  # 10
+        high_threshold = 40  # 70
+        edges = cv2.Canny(gray_img, low_threshold, high_threshold)
+        edges = cv2.bitwise_not(edges)
+        kernel_size = 5
+        for i in range(8):
+            edges = cv2.GaussianBlur(edges, (kernel_size, kernel_size), 0)
+            ret, edges = cv2.threshold(edges, 180, 255, cv2.THRESH_BINARY)
+
+            if i < 2:
+                contours, hierarchy = cv2.findContours(cv2.bitwise_not(edges), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                short_contours = [contour for contour in contours if cv2.contourArea(contour) < 200]
+                cv2.fillPoly(edges, pts=short_contours, color=(255, 255, 255))
+
+        filled = super()._fill_holes(edges)
+        return filled
+
+
+class AdaptiveGaussianPhotoFinder(ScanMultiCropper):
+    def __init__(self, edge_sensitivity=3, **kwargs):
+        self.edge_sensitivity: int = edge_sensitivity
+        super().__init__(**kwargs)
+
+    def _get_blobs(self, gray_img):
+        blobs = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+
+        if self.debug:
+            self.plot(blobs, title="before open")
+
+        kernel_size = 2*self.edge_sensitivity + 1  # 7
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        opening = cv2.morphologyEx(blobs, cv2.MORPH_OPEN, kernel)
+
+        if self.debug:
+            self.plot(opening, title="after open")
+
+        contours, hierarchy = cv2.findContours(cv2.bitwise_not(opening), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        short_contours = [contour for contour in contours if cv2.contourArea(contour) < 200]
+        cv2.fillPoly(opening, pts=short_contours, color=(255, 255, 255))
+
+        opening = self._fill_holes(opening)
+
+        if self.debug:
+            self.plot(opening, title="filled")
+
+        opening = cv2.morphologyEx(opening, cv2.MORPH_OPEN, kernel)
+        if self.debug:
+            self.plot(opening, title="opened again")
+
+        kernel_size = 9
+        for i in range(2):
+            opening = cv2.GaussianBlur(opening, (kernel_size, kernel_size), 0)
+            ret, opening = cv2.threshold(opening, 30, 255, cv2.THRESH_BINARY)
+
+        filled = self._fill_holes(opening)
+
+        return filled
+
+
 class DatedScanMultiCropper(ScanMultiCropper):
     def __init__(self, year, month=1, day=1, **kwargs):
-        print(kwargs)
         super().__init__(**kwargs)
         self.year = year
         self.month = month
@@ -245,7 +264,6 @@ class DatedScanMultiCropper(ScanMultiCropper):
 
 class TaggedScanMultiCropper(ScanMultiCropper):
     def __init__(self, tags, **kwargs):
-        print(kwargs)
         super().__init__(**kwargs)
         self.tags = tags
         print(f"Saved photos will have tags: {tags}")
@@ -257,7 +275,3 @@ class TaggedScanMultiCropper(ScanMultiCropper):
             ucs2 += [ord(c), 0]
         exif_dict["0th"][piexif.ImageIFD.XPKeywords] = ucs2
         return exif_dict
-
-
-class TaggedDatedScanMultiCropper(TaggedScanMultiCropper, DatedScanMultiCropper):
-    pass
