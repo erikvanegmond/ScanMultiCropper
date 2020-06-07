@@ -12,19 +12,21 @@ import scipy.cluster.hierarchy as hcluster
 
 class ScanMultiCropper:
 
-    def __init__(self, scan_dir="", output_dir="", debug=False, **kwargs):
+    def __init__(self, scan_dir="", output_dir="", debug=False, photo=None, **kwargs):
         self.scan_dir = scan_dir
         self.output_dir = output_dir
         self.debug = debug
+        self.photo = photo
+        self.file_name_format = "{original_file_name}_{i}"
         print(f"Processing files in {self.scan_dir} and moving cropped photos to {self.output_dir}")
 
-    def run(self, save=True, show=False, photo=None, crop=True):
+    def run(self, save=True, show=False, crop=True):
         for filename in os.listdir(self.scan_dir):
             if filename.lower().endswith((".jpg", ".jpeg", ".png")) and \
                     (
-                            not photo or
-                            filename == photo or
-                            (type(photo) == list and filename in photo)
+                            not self.photo or
+                            filename == self.photo or
+                            (type(self.photo) == list and filename in self.photo)
                     ):
                 self._process_file(filename, save=save, show=show, crop=crop)
 
@@ -170,9 +172,19 @@ class ScanMultiCropper:
         exif_dict.pop('thumbnail', None)
         return exif_dict
 
-    def _save(self, file_path, img):
+    def _get_file_name(self, original_file_name, i):
+        args_dict = self.__dict__
+        args_dict['i'] = i
+        args_dict['original_file_name'] = original_file_name
+        return self.file_name_format.format(**args_dict)
+
+    def _save(self, original_file_name, ith_photo, img):
         exif_dict = self._get_exif(img)
-        img.save(os.path.join(self.output_dir, file_path), "JPEG", exif=piexif.dump(exif_dict))
+        img.save(
+            fp=os.path.join(self.output_dir, self._get_file_name(original_file_name.rsplit(".")[0], ith_photo) + ".jpg"),
+            format="JPEG",
+            exif=piexif.dump(exif_dict)
+        )
 
     def _crop(self, filename, boundaries, pil_im, scale_factor):
         for i, [mins, maxs, _] in enumerate(boundaries):
@@ -184,7 +196,7 @@ class ScanMultiCropper:
                     int(maxs[0] / scale_factor)
                 )
             )
-            self._save(filename.rsplit(".")[0] + f"_{i + 1}" + ".jpg", crop)
+            self._save(filename, i, crop)
 
 
 class EdgeBasedPhotoFinder(ScanMultiCropper):
@@ -218,7 +230,7 @@ class AdaptiveGaussianPhotoFinder(ScanMultiCropper):
         if self.debug:
             self.plot(blobs, title="before open")
 
-        kernel_size = 2*self.edge_sensitivity + 1  # 7
+        kernel_size = 2 * self.edge_sensitivity + 1  # 7
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
         opening = cv2.morphologyEx(blobs, cv2.MORPH_OPEN, kernel)
 
@@ -254,6 +266,7 @@ class DatedScanMultiCropper(ScanMultiCropper):
         self.year = year
         self.month = month
         self.day = day
+        self.file_name_format = "{year}-{month}-{day}_{original_file_name}_{i}"
         print(f"Saved photos will have the date {year}-{month}-{day}")
 
     def _get_exif(self, img):
